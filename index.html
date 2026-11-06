@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es-PE">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>JESSDAY STYLE · Control de tiempo</title>
+  <meta name="description" content="Control de tiempo del emprendimiento JESSDAY STYLE">
+  <meta name="theme-color" content="#1c1917">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231c1917'/%3E%3Ctext x='32' y='43' font-family='Georgia,serif' font-size='34' text-anchor='middle' fill='%23c9a66b'%3EJ%3C/text%3E%3C/svg%3E">
+
+  <!-- Única dependencia visual externa: Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#view">Saltar al contenido</a>
+
+  <!-- Pantalla de carga -->
+  <div id="splash" class="splash" role="status">
+    <p class="brand-mark">JESSDAY STYLE</p>
+    <p class="muted">Cargando…</p>
+  </div>
+
+  <!-- Pantalla de ingreso -->
+  <section id="login" class="login" hidden>
+    <div class="login-card">
+      <p class="brand-mark">JESSDAY STYLE</p>
+      <h1>Control de tiempo de mi emprendimiento</h1>
+      <p class="muted">Registra cuánto tiempo dedicas a cada actividad: lives, contenido, empaquetado, compras y más.</p>
+      <button class="btn btn-primary btn-block btn-lg" data-action="login">Continuar con Google</button>
+      <p id="login-error" class="login-error" role="alert" hidden></p>
+    </div>
+  </section>
+
+  <!-- Aplicación -->
+  <div id="app" hidden>
+    <header class="topbar">
+      <div>
+        <p class="brand">JESSDAY STYLE</p>
+        <p class="tagline">Control de tiempo de mi emprendimiento</p>
+      </div>
+      <button id="user-chip" class="user-chip" data-action="tab" data-value="ajustes" aria-label="Abrir ajustes"></button>
+    </header>
+
+    <main id="view" tabindex="-1"></main>
+
+    <nav class="tabbar" aria-label="Secciones">
+      <button data-action="tab" data-value="panel"><span aria-hidden="true">🏠</span><span>Panel</span></button>
+      <button data-action="tab" data-value="registrar"><span aria-hidden="true">⏱️</span><span>Registrar</span></button>
+      <button data-action="tab" data-value="historial"><span aria-hidden="true">📖</span><span>Historial</span></button>
+      <button data-action="tab" data-value="ajustes"><span aria-hidden="true">⚙️</span><span>Ajustes</span></button>
+    </nav>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="confirm-root"></div>
+  <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
