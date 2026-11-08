@@ -104,6 +104,7 @@ const state = {
   user: null, users: [], categories: [], entries: [], goal: 0,
   tab: "panel", range: "hoy", weekAnchor: weekStart(todayStr()), monthAnchor: monthStart(todayStr()),
   person: "all", regMode: "cron", filters: { cat: "", from: "", to: "" }, limit: 60,
+  histView: "lista", calMonth: monthStart(todayStr()), calDay: null, // Historial: vista Lista / Calendario
   unsubs: []
 };
 
@@ -371,30 +372,88 @@ function entryCard(e) {
     ${e.note ? `<p class="note">${esc(e.note)}</p>` : ""}${state.users.length > 1 ? `<span class="tag">${esc(first(e.userName))}</span>` : ""}</div></div>
     ${mine ? `<div class="entry-actions"><button class="icon-btn" data-action="edit-entry" data-id="${esc(e.id)}" aria-label="Editar registro">✏️</button><button class="icon-btn" data-action="delete-entry" data-id="${esc(e.id)}" aria-label="Eliminar registro">🗑️</button></div>` : ""}</article>`;
 }
-function filteredEntries() {
+/** Aplica persona + categoría (+ Desde/Hasta si useDates). El calendario no usa Desde/Hasta: el mes se elige con las flechas */
+function filteredEntries(useDates = true) {
   const f = state.filters;
   return state.entries
-    .filter(e => (state.person === "all" || e.uid === state.person) && (!f.cat || e.categoryId === f.cat) && (!f.from || e.date >= f.from) && (!f.to || e.date <= f.to))
+    .filter(e => (state.person === "all" || e.uid === state.person) && (!f.cat || e.categoryId === f.cat)
+      && (!useDates || ((!f.from || e.date >= f.from) && (!f.to || e.date <= f.to))))
     .sort((a, b) => (a.date === b.date ? b.start.localeCompare(a.start) : b.date.localeCompare(a.date)));
 }
-function viewHistory() {
-  const f = state.filters;
-  const list = filteredEntries();
-  const total = list.reduce((a, e) => a + e.durationMin, 0);
+
+/** Historial en lista, agrupado por día */
+function histListHTML(list) {
   const shown = list.slice(0, state.limit);
   const groups = new Map();
   shown.forEach(e => { if (!groups.has(e.date)) groups.set(e.date, []); groups.get(e.date).push(e); });
-  const catSel = `<option value="">Todas</option>` + state.categories.map(c => `<option value="${esc(c.id)}"${f.cat === c.id ? " selected" : ""}>${esc(c.emoji)} ${esc(c.name)}</option>`).join("");
-  return `<div class="stack">${personChips()}
-    <article class="card"><div class="filters">
-      <div class="full"><label for="f-cat">Categoría</label><select id="f-cat" data-filter="cat">${catSel}</select></div>
-      <div><label for="f-from">Desde</label><input id="f-from" type="date" data-filter="from" value="${esc(f.from)}"></div>
-      <div><label for="f-to">Hasta</label><input id="f-to" type="date" data-filter="to" value="${esc(f.to)}"></div></div>
-      <div class="card-head"><p class="muted"><strong>${list.length}</strong> registros · <strong>${fmtDur(total)}</strong></p>
-      <button class="btn btn-ghost btn-sm" data-action="clear-filters">Limpiar filtros</button></div></article>
-    ${list.length ? [...groups].map(([d, items]) => `<div class="day-head"><h3>${fmtHistDate(d)}</h3><span class="muted">${fmtDur(items.reduce((a, e) => a + e.durationMin, 0))}</span></div>${items.map(entryCard).join("")}`).join("")
+  return `${list.length ? [...groups].map(([d, items]) => `<div class="day-head"><h3>${fmtHistDate(d)}</h3><span class="muted">${fmtDur(items.reduce((a, e) => a + e.durationMin, 0))}</span></div>${items.map(entryCard).join("")}`).join("")
       : emptyState("No hay registros con estos filtros.", false)}
-    ${list.length > state.limit ? `<button class="btn btn-ghost btn-block" data-action="more">Mostrar más</button>` : ""}</div>`;
+    ${list.length > state.limit ? `<button class="btn btn-ghost btn-block" data-action="more">Mostrar más</button>` : ""}`;
+}
+
+/** Día seleccionado del calendario: el que se tocó o, si se ve el mes actual, hoy */
+function calSelected() {
+  const mk = state.calMonth.slice(0, 7);
+  if (state.calDay && state.calDay.slice(0, 7) === mk) return state.calDay;
+  const t = todayStr();
+  return t.slice(0, 7) === mk ? t : null;
+}
+
+/** Historial en calendario: cuadrícula del mes (lunes a domingo) con el total y los emojis de cada día */
+function histCalendarHTML(list) {
+  const today = todayStr(), ms = state.calMonth, me = monthEnd(ms), sel = calSelected();
+  const [y, m] = ms.split("-").map(Number);
+  const head = [...Array(7)].map((_, i) => DOW[(i + 1) % 7]); // Lun … Dom
+
+  // Registros del mes agrupados por día
+  const byDay = new Map();
+  list.forEach(e => { if (e.date >= ms && e.date <= me) { if (!byDay.has(e.date)) byDay.set(e.date, []); byDay.get(e.date).push(e); } });
+
+  // Semanas completas; los días de otros meses quedan como huecos
+  const cells = [];
+  for (let d = weekStart(ms), last = addDays(weekStart(me), 6); d <= last; d = addDays(d, 1)) {
+    if (d < ms || d > me) { cells.push(`<span aria-hidden="true"></span>`); continue; }
+    const s = summarize(byDay.get(d) || []);
+    const extra = s.byCat.length > 3; // con más de 3 categorías: 2 emojis + "+N"
+    const icons = s.byCat.slice(0, extra ? 2 : 3).map(c => esc(c.info.emoji)).join("")
+      + (extra ? `<span class="cal-more">+${s.byCat.length - 2}</span>` : "");
+    const label = `${fmtHistDate(d)}: ${s.count ? `${fmtDur(s.total)} en ${s.count} ${s.count === 1 ? "registro" : "registros"}` : "sin registros"}`;
+    cells.push(`<button type="button" class="cal-day${s.count ? " has" : ""}${d === today ? " today" : ""}" data-action="cal-day" data-value="${d}" aria-pressed="${d === sel}"${d === today ? ' aria-current="date"' : ""} aria-label="${esc(label)}">
+      <span class="cal-num">${Number(d.slice(8))}</span>${s.count ? `<span class="cal-time">${fmtDur(s.total)}</span><span class="cal-ico" aria-hidden="true">${icons}</span>` : ""}</button>`);
+  }
+
+  // Detalle del día seleccionado (mismas tarjetas que la lista, con editar y eliminar)
+  const dayList = sel ? list.filter(e => e.date === sel).sort((a, b) => b.start.localeCompare(a.start)) : [];
+  const detail = sel
+    ? `<div class="day-head" id="cal-detail"><h3>${fmtHistDate(sel)}</h3><span class="muted">${fmtDur(dayList.reduce((a, e) => a + e.durationMin, 0))}</span></div>${dayList.length ? dayList.map(entryCard).join("") : emptyState("No hay registros este día con estos filtros.", false)}`
+    : `<p class="muted cal-hint">Toca un día para ver su detalle.</p>`;
+
+  return `<div class="nav-row"><button class="icon-btn" data-action="cal-prev" aria-label="Mes anterior">‹</button>
+    <strong>${MONTHS[m - 1]} ${y}</strong><button class="icon-btn" data-action="cal-next" aria-label="Mes siguiente">›</button></div>
+    <article class="card cal-card"><div class="cal-week" aria-hidden="true">${head.map(n => `<span>${n}</span>`).join("")}</div><div class="cal-grid">${cells.join("")}</div></article>${detail}`;
+}
+
+function viewHistory() {
+  const f = state.filters, cal = state.histView === "calendario";
+  const list = filteredEntries(!cal);
+  // El resumen del calendario cuenta solo el mes que se está viendo
+  const ms = state.calMonth, me = monthEnd(ms);
+  const scope = cal ? list.filter(e => e.date >= ms && e.date <= me) : list;
+  const total = scope.reduce((a, e) => a + e.durationMin, 0);
+  const catSel = `<option value="">Todas</option>` + state.categories.map(c => `<option value="${esc(c.id)}"${f.cat === c.id ? " selected" : ""}>${esc(c.emoji)} ${esc(c.name)}</option>`).join("");
+  const dates = cal ? "" : `
+      <div><label for="f-from">Desde</label><input id="f-from" type="date" data-filter="from" value="${esc(f.from)}"></div>
+      <div><label for="f-to">Hasta</label><input id="f-to" type="date" data-filter="to" value="${esc(f.to)}"></div>`;
+  return `<div class="stack">
+    <div class="seg" role="group" aria-label="Vista del historial">
+      <button class="seg-btn" data-action="hist-view" data-value="lista" aria-pressed="${!cal}">📖 Lista</button>
+      <button class="seg-btn" data-action="hist-view" data-value="calendario" aria-pressed="${cal}">📅 Calendario</button></div>
+    ${personChips()}
+    <article class="card"><div class="filters">
+      <div class="full"><label for="f-cat">Categoría</label><select id="f-cat" data-filter="cat">${catSel}</select></div>${dates}</div>
+      <div class="card-head"><p class="muted"><strong>${scope.length}</strong> registros${cal ? " del mes" : ""} · <strong>${fmtDur(total)}</strong></p>
+      <button class="btn btn-ghost btn-sm" data-action="clear-filters">Limpiar filtros</button></div></article>
+    ${cal ? histCalendarHTML(list) : histListHTML(list)}</div>`;
 }
 
 /* --- Ajustes --- */
@@ -610,6 +669,19 @@ const actions = {
   more: () => { state.limit += 60; render(); },
   "close-modal": closeModal,
   "pick-emoji": el => { const i = $("#c-emoji"); if (i) { i.value = el.dataset.value; i.focus(); } },
+
+  // Historial: cambiar entre Lista y Calendario, y moverse por los meses del calendario
+  "hist-view": el => { state.histView = el.dataset.value; render(); },
+  "cal-prev": () => { state.calMonth = addMonths(state.calMonth, -1); state.calDay = null; render(); },
+  "cal-next": () => { state.calMonth = addMonths(state.calMonth, 1); state.calDay = null; render(); },
+  "cal-day": el => {
+    const d = el.dataset.value;
+    state.calDay = d;
+    render();
+    // Devuelve el foco al día tocado y deja a la vista el detalle que aparece debajo
+    $(`[data-action="cal-day"][data-value="${d}"]`)?.focus({ preventScroll: true });
+    $("#cal-detail")?.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  },
 
   "timer-start": () => {
     const id = $('input[name="tcat"]:checked')?.value;

@@ -196,6 +196,21 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .filters .full { grid-column: 1 / -1; }
 .filters label { font-size: .75rem; font-weight: 600; }
 
+/* ---------- Historial: vista calendario ---------- */
+.cal-card { padding: 12px; gap: 6px; }
+.cal-week, .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.cal-week span { text-align: center; font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.cal-day { min-width: 0; min-height: 72px; padding: 4px 1px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.cal-day:hover, .cal-day.has { background: var(--nude); }
+.cal-day[aria-pressed="true"] { background: var(--rose); border-color: var(--ink); }
+.cal-num { min-width: 22px; padding: 0 4px; border-radius: 999px; font-size: .75rem; font-weight: 600; line-height: 1.5; }
+.cal-day.today .cal-num { background: var(--gold); color: var(--ink); }
+.cal-time { font-size: .58rem; font-weight: 600; white-space: nowrap; }
+.cal-ico { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; font-size: .8rem; line-height: 1.2; }
+.cal-more { font-size: .58rem; font-weight: 600; margin-left: 1px; }
+.cal-hint { text-align: center; }
+#cal-detail { scroll-margin-bottom: 96px; }
+
 /* ---------- Ajustes ---------- */
 .cat-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .cat-item { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-left: 6px solid var(--c); border-radius: 14px; padding: 8px 10px; }
