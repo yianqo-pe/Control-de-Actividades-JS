@@ -99,6 +99,38 @@ function calcDuration(start, end) {
   return e < s ? e + 1440 - s : e - s;
 }
 
+/* --- Datos del LIVE: Nuevos seguidores, Visualización, Esp. Max., Esp. Prom. y Publicidad --- */
+const LIVE_CAT_ID = "live"; // id de la categoría "Emisión LIVE (TikTok)": solo ella muestra estos campos
+const LIVE_COUNTS = [["newFollowers", "Nuevos seguidores"], ["views", "Visualización"], ["maxViewers", "Esp. Max."], ["avgViewers", "Esp. Prom."]];
+const LIVE_KEYS = [...LIVE_COUNTS.map(c => c[0]), "withAds"];
+const isNum = v => typeof v === "number" && Number.isFinite(v);
+
+/** Texto → número entero. "1.5k" = 1500 · "2k" = 2000 · "1,2 mil" = 1200 · "1.250" = 1250 · "340" = 340.
+ *  Vacío → null (sin dato). Texto no válido → NaN. */
+function parseCount(txt) {
+  const s = String(txt ?? "").trim().toLowerCase().replace(/\s+/g, "");
+  if (!s) return null;
+  const abrev = s.match(/^(\d+(?:[.,]\d+)?)(k|mil|m)$/);
+  let n;
+  if (abrev) n = Math.round(parseFloat(abrev[1].replace(",", ".")) * (abrev[2] === "m" ? 1e6 : 1e3));
+  else if (/^\d{1,3}([.,]\d{3})+$/.test(s)) n = parseInt(s.replace(/[.,]/g, ""), 10); // separador de miles
+  else if (/^\d+$/.test(s)) n = parseInt(s, 10);
+  else return NaN;
+  return n <= 1e9 ? n : NaN;
+}
+/** Número → texto corto para mostrar: 340 → "340", 1500 → "1.5k", 1200000 → "1.2M" */
+function fmtCount(n) {
+  if (n < 1000) return String(n);
+  return n < 999950 ? `${Math.round(n / 100) / 10}k` : `${Math.round(n / 1e5) / 10}M`;
+}
+/** Datos del LIVE de un respaldo: solo los que vienen en el archivo (así un respaldo viejo no borra datos nuevos) */
+function liveFromBackup(x) {
+  const o = {};
+  LIVE_COUNTS.forEach(([k]) => { if (k in x) o[k] = isNum(x[k]) && x[k] >= 0 ? Math.round(x[k]) : null; });
+  if ("withAds" in x) o.withAds = typeof x.withAds === "boolean" ? x.withAds : null;
+  return o;
+}
+
 /* ============ 4. ESTADO ============ */
 const state = {
   user: null, users: [], categories: [], entries: [], goal: 0,
@@ -321,6 +353,7 @@ function entryFormHTML(p, v, submitText) {
     </div>
     <p class="preview" id="${p}preview" aria-live="polite"></p>
     <label for="${p}cat">Categoría</label><select id="${p}cat" name="categoryId" required>${catOptions(v.categoryId, v)}</select>
+    ${liveFieldsHTML(p, v, v.categoryId === LIVE_CAT_ID)}
     <label for="${p}note">Nota (opcional)</label><textarea id="${p}note" name="note" rows="2" maxlength="300" placeholder="Ej. Live de vestidos de temporada">${esc(v.note || "")}</textarea>
     <button class="btn btn-primary btn-block" type="submit">${submitText}</button></form>`;
 }
@@ -335,6 +368,47 @@ function updatePreview(f) {
   el.textContent = `Duración: ${fmtDur(d)}${toMin(e) < toMin(s) ? " · cruza la medianoche 🌙" : ""}`;
 }
 const refreshPreviews = () => $$('form[data-form="entry"]').forEach(updatePreview);
+
+/** Recuadro "Datos del LIVE": 4 números opcionales + botones Sin / Con Publicidad. visible=false lo oculta (otras categorías) */
+function liveFieldsHTML(p, v = {}, visible = true) {
+  const val = n => (isNum(n) ? String(n) : ""); // al editar se muestra el número exacto (1500), no el abreviado
+  const ids = { newFollowers: "nf", views: "vw", maxViewers: "mx", avgViewers: "av" };
+  const hints = { newFollowers: "Ej. 25", views: "Ej. 1.5k", maxViewers: "Ej. 120", avgViewers: "Ej. 45" };
+  return `<fieldset class="live-box" data-live-fields${visible ? "" : " hidden"}><legend>📡 Datos del LIVE</legend>
+    <div class="row2">${LIVE_COUNTS.map(([k, label]) =>
+      `<div><label for="${p}${ids[k]}">${label}</label><input id="${p}${ids[k]}" name="${k}" type="text" inputmode="${k === "views" ? "text" : "numeric"}" autocomplete="off" placeholder="${hints[k]}" value="${esc(val(v[k]))}"></div>`).join("")}</div>
+    <fieldset class="ads"><legend>Publicidad</legend><div class="seg">
+      <label class="seg-opt"><input type="radio" name="ads" value="sin"${v.withAds === true ? "" : " checked"}><span>Sin Publicidad</span></label>
+      <label class="seg-opt"><input type="radio" name="ads" value="con"${v.withAds === true ? " checked" : ""}><span>Con Publicidad</span></label></div></fieldset></fieldset>`;
+}
+/** Muestra el recuadro del LIVE solo cuando la categoría elegida es la de LIVE */
+function syncLiveBlocks() {
+  $$('form[data-form="entry"]').forEach(f => {
+    const box = $("[data-live-fields]", f);
+    if (box) box.hidden = f.elements.categoryId?.value !== LIVE_CAT_ID;
+  });
+}
+/** Lee el recuadro del LIVE de un formulario. Devuelve null (y avisa) si algún número no es válido */
+function readLive(f) {
+  const fd = new FormData(f);
+  const live = { withAds: fd.get("ads") === "con" };
+  for (const [k, label] of LIVE_COUNTS) {
+    const n = parseCount(fd.get(k));
+    if (Number.isNaN(n)) { toast(`${label}: escribe un número, por ejemplo 250 o 1.5k`, "error"); return null; }
+    live[k] = n;
+  }
+  return live;
+}
+/** Datos del LIVE en la tarjeta del Historial (solo los que tengan valor) */
+function liveStatsHTML(e) {
+  const chips = [];
+  if (isNum(e.newFollowers)) chips.push(`👥 +${fmtCount(e.newFollowers)} seguidores`);
+  if (isNum(e.views)) chips.push(`👁️ ${fmtCount(e.views)} visualizaciones`);
+  if (isNum(e.maxViewers)) chips.push(`🔝 Esp. Max. ${fmtCount(e.maxViewers)}`);
+  if (isNum(e.avgViewers)) chips.push(`📊 Esp. Prom. ${fmtCount(e.avgViewers)}`);
+  if (typeof e.withAds === "boolean") chips.push(e.withAds ? "📢 Con publicidad" : "Sin publicidad");
+  return chips.length ? `<div class="live-stats">${chips.map(c => `<span class="live-chip">${c}</span>`).join("")}</div>` : "";
+}
 
 function timerStartCard() {
   if (!state.categories.length) return emptyState("Primero crea una categoría en Ajustes.", false);
@@ -369,7 +443,7 @@ function entryCard(e) {
   const c = catInfo(e), mine = e.uid === state.user.uid;
   return `<article class="entry" style="--c:${c.color}"><div class="entry-main"><span class="entry-emoji" aria-hidden="true">${esc(c.emoji)}</span>
     <div><h4>${esc(c.name)}</h4><p class="muted">${esc(e.start)} – ${esc(e.end)}${e.crossesMidnight ? " (+1 día)" : ""} · <strong>${fmtDur(e.durationMin)}</strong></p>
-    ${e.note ? `<p class="note">${esc(e.note)}</p>` : ""}${state.users.length > 1 ? `<span class="tag">${esc(first(e.userName))}</span>` : ""}</div></div>
+    ${e.note ? `<p class="note">${esc(e.note)}</p>` : ""}${liveStatsHTML(e)}${state.users.length > 1 ? `<span class="tag">${esc(first(e.userName))}</span>` : ""}</div></div>
     ${mine ? `<div class="entry-actions"><button class="icon-btn" data-action="edit-entry" data-id="${esc(e.id)}" aria-label="Editar registro">✏️</button><button class="icon-btn" data-action="delete-entry" data-id="${esc(e.id)}" aria-label="Eliminar registro">🗑️</button></div>` : ""}</article>`;
 }
 /** Aplica persona + categoría (+ Desde/Hasta si useDates). El calendario no usa Desde/Hasta: el mes se elige con las flechas */
@@ -496,6 +570,7 @@ function render(keepForm = false) {
   const focusId = keepForm ? document.activeElement?.id : null;
   view.innerHTML = ({ panel: viewPanel, registrar: viewRegister, historial: viewHistory, ajustes: viewSettings })[state.tab]();
   if (saved) restoreForm(view, saved);
+  syncLiveBlocks();
   if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
   $$(".tabbar button").forEach(b => b.dataset.value === state.tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
   refreshPreviews();
@@ -538,6 +613,12 @@ async function saveEntry(d, source, opts = {}) {
     date: d.date, start: d.start, end: d.end, durationMin: duration,
     crossesMidnight: toMin(d.end) < toMin(d.start), note: d.note || "", updatedAt: Date.now()
   };
+  // Datos del LIVE: solo se guardan en la categoría LIVE; si un registro deja de ser LIVE, se borran
+  if (d.categoryId === LIVE_CAT_ID) {
+    if (d.live) LIVE_KEYS.forEach(k => { data[k] = d.live[k] ?? null; });
+  } else if (orig && LIVE_KEYS.some(k => orig[k] != null)) {
+    LIVE_KEYS.forEach(k => { data[k] = null; });
+  }
   try {
     if (d.id) await setDoc(doc(db, "entries", d.id), data, { merge: true });
     else await addDoc(collection(db, "entries"), { ...data, uid: state.user.uid, userName: state.user.displayName || state.user.email, source, createdAt: Date.now() });
@@ -549,6 +630,26 @@ async function saveEntry(d, source, opts = {}) {
     toast("No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.", "error");
     return false;
   }
+}
+
+/** Guarda el registro de un cronómetro terminado; si todo salió bien, borra el cronómetro */
+async function finishTimer(t, minutes, endMs, note, live) {
+  const a = limaParts(t.firstStart), b = limaParts(endMs);
+  const end = a.time === b.time ? minToTime(toMin(a.time) + 1) : b.time;
+  const ok = await saveEntry({ date: a.date, start: a.time, end, categoryId: t.categoryId, note, live }, "cronometro", { durationMin: minutes });
+  if (ok) { saveTimer(null); render(); }
+  return ok;
+}
+
+/** Ventana que aparece al finalizar un LIVE para anotar sus datos. La hora de fin y la duración quedan fijas desde que se presionó Finalizar */
+let pendingFinish = null;
+function liveFinishModal(p) {
+  pendingFinish = p;
+  const c = catInfo(p.t);
+  showModal(`${modalHead("Datos del LIVE")}
+    <p class="muted">${esc(c.emoji)} ${esc(c.name)} · ${fmtDur(p.minutes)}. Todo es opcional: puedes dejarlo vacío y completarlo después desde el Historial (✏️).</p>
+    <form data-form="live-finish" class="form" novalidate>${liveFieldsHTML("fin-")}
+    <button class="btn btn-primary btn-block" type="submit">Guardar registro</button></form>`);
 }
 
 /* ============ 10. EXPORTAR / IMPORTAR ============ */
@@ -564,10 +665,11 @@ const csvCell = v => {
   return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 function exportCSV() {
-  const rows = [["Fecha", "Día", "Inicio", "Fin", "Duración", "Minutos", "Categoría", "Persona", "Nota"]];
+  const rows = [["Fecha", "Día", "Inicio", "Fin", "Duración", "Minutos", "Categoría", "Persona", "Nota", "Nuevos seguidores", "Visualizaciones", "Esp. Max.", "Esp. Prom.", "Publicidad"]];
   [...state.entries].sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)).forEach(e => {
     const [y, m, d] = e.date.split("-");
-    rows.push([`${d}/${m}/${y}`, DOW[toDate(e.date).getUTCDay()], e.start, e.end, fmtDur(e.durationMin), e.durationMin, catInfo(e).name, e.userName || "", e.note || ""]);
+    rows.push([`${d}/${m}/${y}`, DOW[toDate(e.date).getUTCDay()], e.start, e.end, fmtDur(e.durationMin), e.durationMin, catInfo(e).name, e.userName || "", e.note || "",
+      ...LIVE_COUNTS.map(([k]) => (isNum(e[k]) ? e[k] : "")), typeof e.withAds === "boolean" ? (e.withAds ? "Con publicidad" : "Sin publicidad") : ""]);
   });
   download(`jessday-historial-${todayStr()}.csv`, "\ufeff" + rows.map(r => r.map(csvCell).join(",")).join("\r\n"), "text/csv;charset=utf-8");
   toast("CSV descargado ✓");
@@ -578,7 +680,8 @@ function exportJSON() {
     categories: state.categories.map(c => ({ id: c.id, name: c.name, emoji: c.emoji, color: c.color, order: c.order ?? 0 })),
     entries: state.entries.map(e => ({
       id: e.id, uid: e.uid, userName: e.userName || "", categoryId: e.categoryId, catName: e.catName || "", catEmoji: e.catEmoji || "", catColor: e.catColor || "",
-      date: e.date, start: e.start, end: e.end, durationMin: e.durationMin, crossesMidnight: !!e.crossesMidnight, note: e.note || "", source: e.source || "manual", createdAt: e.createdAt || null
+      date: e.date, start: e.start, end: e.end, durationMin: e.durationMin, crossesMidnight: !!e.crossesMidnight, note: e.note || "", source: e.source || "manual", createdAt: e.createdAt || null,
+      ...Object.fromEntries(LIVE_KEYS.filter(k => e[k] != null).map(k => [k, e[k]]))
     }))
   };
   download(`jessday-respaldo-${todayStr()}.json`, JSON.stringify(data, null, 2), "application/json");
@@ -599,7 +702,7 @@ async function importBackup(file) {
       ...cats.map(c => [doc(db, "categories", c.id), { name: String(c.name).slice(0, 60), emoji: String(c.emoji || "🏷️").slice(0, 8), color: String(c.color || "#c9a66b"), order: Number(c.order) || 0 }]),
       ...entries.map(x => [doc(db, "entries", x.id), {
         uid: String(x.uid || state.user.uid), userName: String(x.userName || ""), categoryId: x.categoryId, catName: String(x.catName || ""), catEmoji: String(x.catEmoji || ""), catColor: String(x.catColor || ""),
-        date: x.date, start: x.start, end: x.end, durationMin: Math.round(x.durationMin), crossesMidnight: !!x.crossesMidnight, note: String(x.note || "").slice(0, 300), source: String(x.source || "import"), createdAt: Number(x.createdAt) || Date.now(), updatedAt: Date.now()
+        date: x.date, start: x.start, end: x.end, durationMin: Math.round(x.durationMin), crossesMidnight: !!x.crossesMidnight, note: String(x.note || "").slice(0, 300), source: String(x.source || "import"), createdAt: Number(x.createdAt) || Date.now(), updatedAt: Date.now(), ...liveFromBackup(x)
       }])
     ];
     for (let i = 0; i < ops.length; i += 400) {
@@ -706,10 +809,10 @@ const actions = {
     const t = loadTimer(); if (!t) return;
     const ms = elapsed(t), minutes = Math.round(ms / 60000), endMs = Date.now();
     if (minutes < 1) { saveTimer(null); render(); toast("Duró menos de 1 minuto: no se guardó", "error"); return; }
-    const a = limaParts(t.firstStart), b = limaParts(endMs);
-    const end = a.time === b.time ? minToTime(toMin(a.time) + 1) : b.time;
-    const ok = await saveEntry({ date: a.date, start: a.time, end, categoryId: t.categoryId, note: ($("#t-note-live")?.value ?? t.note ?? "").trim() }, "cronometro", { durationMin: minutes });
-    if (ok) { saveTimer(null); render(); }
+    const note = ($("#t-note-live")?.value ?? t.note ?? "").trim();
+    // Si era un LIVE, antes de guardar se piden sus datos (todos opcionales)
+    if (t.categoryId === LIVE_CAT_ID) { liveFinishModal({ t, minutes, endMs, note }); return; }
+    await finishTimer(t, minutes, endMs, note, null);
   },
 
   "edit-entry": el => {
@@ -742,11 +845,22 @@ const actions = {
 const forms = {
   entry: async f => {
     const fd = new FormData(f);
-    const btn = $('button[type="submit"]', f); btn.disabled = true;
     const data = { id: fd.get("id") || null, date: fd.get("date"), start: fd.get("start"), end: fd.get("end"), categoryId: fd.get("categoryId"), note: String(fd.get("note") || "").trim() };
+    // Si es un LIVE, se leen también sus datos (un número mal escrito se avisa antes de guardar)
+    if (data.categoryId === LIVE_CAT_ID) { data.live = readLive(f); if (!data.live) return; }
+    const btn = $('button[type="submit"]', f); btn.disabled = true;
     const ok = await saveEntry(data, "manual");
     btn.disabled = false;
-    if (ok) { if (data.id) closeModal(); else { f.reset(); refreshPreviews(); } }
+    if (ok) { if (data.id) closeModal(); else { f.reset(); syncLiveBlocks(); refreshPreviews(); } }
+  },
+  "live-finish": async f => {
+    const live = readLive(f); if (!live) return;
+    if (!pendingFinish) { closeModal(); return; }
+    const btn = $('button[type="submit"]', f); btn.disabled = true;
+    const { t, minutes, endMs, note } = pendingFinish;
+    const ok = await finishTimer(t, minutes, endMs, note, live);
+    btn.disabled = false;
+    if (ok) { pendingFinish = null; closeModal(); }
   },
   goal: async f => {
     const v = Math.max(0, Math.min(168, Number(new FormData(f).get("goal")) || 0));
@@ -782,6 +896,7 @@ document.addEventListener("input", e => {
 });
 document.addEventListener("change", e => {
   const el = e.target;
+  if (el.name === "categoryId" && el.closest('form[data-form="entry"]')) syncLiveBlocks();
   if (el.dataset?.filter) { state.filters[el.dataset.filter] = el.value; state.limit = 60; render(); }
   if (el.id === "import-file") { importBackup(el.files[0]); el.value = ""; }
 });
