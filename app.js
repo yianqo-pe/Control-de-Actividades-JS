@@ -446,12 +446,12 @@ function entryCard(e) {
     ${e.note ? `<p class="note">${esc(e.note)}</p>` : ""}${liveStatsHTML(e)}${state.users.length > 1 ? `<span class="tag">${esc(first(e.userName))}</span>` : ""}</div></div>
     ${mine ? `<div class="entry-actions"><button class="icon-btn" data-action="edit-entry" data-id="${esc(e.id)}" aria-label="Editar registro">✏️</button><button class="icon-btn" data-action="delete-entry" data-id="${esc(e.id)}" aria-label="Eliminar registro">🗑️</button></div>` : ""}</article>`;
 }
-/** Aplica persona + categoría (+ Desde/Hasta si useDates). El calendario no usa Desde/Hasta: el mes se elige con las flechas */
-function filteredEntries(useDates = true) {
+/** Aplica persona + categoría + Desde/Hasta. Es el mismo filtro en la vista Lista y en la vista Calendario */
+function filteredEntries() {
   const f = state.filters;
   return state.entries
     .filter(e => (state.person === "all" || e.uid === state.person) && (!f.cat || e.categoryId === f.cat)
-      && (!useDates || ((!f.from || e.date >= f.from) && (!f.to || e.date <= f.to))))
+      && (!f.from || e.date >= f.from) && (!f.to || e.date <= f.to))
     .sort((a, b) => (a.date === b.date ? b.start.localeCompare(a.start) : b.date.localeCompare(a.date)));
 }
 
@@ -491,8 +491,9 @@ function histCalendarHTML(list) {
     const extra = s.byCat.length > 3; // con más de 3 categorías: 2 emojis + "+N"
     const icons = s.byCat.slice(0, extra ? 2 : 3).map(c => esc(c.info.emoji)).join("")
       + (extra ? `<span class="cal-more">+${s.byCat.length - 2}</span>` : "");
-    const label = `${fmtHistDate(d)}: ${s.count ? `${fmtDur(s.total)} en ${s.count} ${s.count === 1 ? "registro" : "registros"}` : "sin registros"}`;
-    cells.push(`<button type="button" class="cal-day${s.count ? " has" : ""}${d === today ? " today" : ""}" data-action="cal-day" data-value="${d}" aria-pressed="${d === sel}"${d === today ? ' aria-current="date"' : ""} aria-label="${esc(label)}">
+    const fuera = (state.filters.from && d < state.filters.from) || (state.filters.to && d > state.filters.to); // día fuera del rango Desde–Hasta
+    const label = `${fmtHistDate(d)}: ${s.count ? `${fmtDur(s.total)} en ${s.count} ${s.count === 1 ? "registro" : "registros"}` : fuera ? "fuera del rango, sin registros" : "sin registros"}`;
+    cells.push(`<button type="button" class="cal-day${s.count ? " has" : ""}${d === today ? " today" : ""}${fuera ? " out" : ""}" data-action="cal-day" data-value="${d}" aria-pressed="${d === sel}"${d === today ? ' aria-current="date"' : ""} aria-label="${esc(label)}">
       <span class="cal-num">${Number(d.slice(8))}</span>${s.count ? `<span class="cal-time">${fmtDur(s.total)}</span><span class="cal-ico" aria-hidden="true">${icons}</span>` : ""}</button>`);
   }
 
@@ -509,13 +510,14 @@ function histCalendarHTML(list) {
 
 function viewHistory() {
   const f = state.filters, cal = state.histView === "calendario";
-  const list = filteredEntries(!cal);
-  // El resumen del calendario cuenta solo el mes que se está viendo
+  const list = filteredEntries();
+  // Resumen del calendario: con Desde/Hasta cuenta todo el rango; sin ellos, solo el mes que se está viendo
+  const hayRango = !!(f.from || f.to);
   const ms = state.calMonth, me = monthEnd(ms);
-  const scope = cal ? list.filter(e => e.date >= ms && e.date <= me) : list;
+  const scope = cal && !hayRango ? list.filter(e => e.date >= ms && e.date <= me) : list;
   const total = scope.reduce((a, e) => a + e.durationMin, 0);
   const catSel = `<option value="">Todas</option>` + state.categories.map(c => `<option value="${esc(c.id)}"${f.cat === c.id ? " selected" : ""}>${esc(c.emoji)} ${esc(c.name)}</option>`).join("");
-  const dates = cal ? "" : `
+  const dates = `
       <div><label for="f-from">Desde</label><input id="f-from" type="date" data-filter="from" value="${esc(f.from)}"></div>
       <div><label for="f-to">Hasta</label><input id="f-to" type="date" data-filter="to" value="${esc(f.to)}"></div>`;
   return `<div class="stack">
@@ -525,7 +527,7 @@ function viewHistory() {
     ${personChips()}
     <article class="card"><div class="filters">
       <div class="full"><label for="f-cat">Categoría</label><select id="f-cat" data-filter="cat">${catSel}</select></div>${dates}</div>
-      <div class="card-head"><p class="muted"><strong>${scope.length}</strong> registros${cal ? " del mes" : ""} · <strong>${fmtDur(total)}</strong></p>
+      <div class="card-head"><p class="muted"><strong>${scope.length}</strong> registros${cal ? (hayRango ? " del rango" : " del mes") : ""} · <strong>${fmtDur(total)}</strong></p>
       <button class="btn btn-ghost btn-sm" data-action="clear-filters">Limpiar filtros</button></div></article>
     ${cal ? histCalendarHTML(list) : histListHTML(list)}</div>`;
 }
@@ -897,7 +899,12 @@ document.addEventListener("input", e => {
 document.addEventListener("change", e => {
   const el = e.target;
   if (el.name === "categoryId" && el.closest('form[data-form="entry"]')) syncLiveBlocks();
-  if (el.dataset?.filter) { state.filters[el.dataset.filter] = el.value; state.limit = 60; render(); }
+  if (el.dataset?.filter) {
+    state.filters[el.dataset.filter] = el.value; state.limit = 60;
+    // Al elegir "Desde", el calendario salta a ese mes
+    if (el.dataset.filter === "from" && el.value) { state.calMonth = monthStart(el.value); state.calDay = null; }
+    render();
+  }
   if (el.id === "import-file") { importBackup(el.files[0]); el.value = ""; }
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#modal-root").innerHTML) closeModal(); });

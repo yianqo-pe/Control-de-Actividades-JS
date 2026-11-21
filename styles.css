@@ -209,6 +209,8 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .cal-ico { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; font-size: .8rem; line-height: 1.2; }
 .cal-more { font-size: .58rem; font-weight: 600; margin-left: 1px; }
 .cal-hint { text-align: center; }
+/* Días fuera del rango Desde–Hasta: atenuados y con borde punteado (no solo por color), sin datos */
+.cal-day.out { opacity: .4; border-style: dashed; }
 #cal-detail { scroll-margin-bottom: 96px; }
 
 /* ---------- Datos del LIVE (Registrar, Editar e Historial) ---------- */
